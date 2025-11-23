@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include <atomic>
+#include <random>
 
 import Configuration;
 import Logger;
@@ -61,12 +62,27 @@ void pipeReaderThread(HANDLE pipeHandle)
     CloseHandle(pipeHandle);
 }
 
+std::wstring createUniquePipeName(std::wstring prefix)
+{
+    static std::random_device rd;
+    static std::mt19937_64 gen(rd());
+    static std::uniform_int_distribution<uint64_t> dis(0, 0xFFFFFFFFFFFFFFFF);
+    wchar_t buffer[17];
+    swprintf_s(buffer, 17, L"%016llx", dis(gen));
+    std::wstring uniqueName = prefix + std::wstring(buffer);
+    return uniqueName;
+}
+
 // Erstellt beide Enden der Named Pipe und gibt das Client-Handle zurück
 // (Das Server-Handle wird für den Reader-Thread verwendet)
 HANDLE createPipeForProcess() {
+    std::wstring pipePrefix = std::wstring(L"\\\\.\\pipe\\mimallocPipe_");
+    std::wstring pipeName = createUniquePipeName(pipePrefix);
+    Logger::Log(Logger::Level::Info, L"Using pipe name \"" + pipeName + L"\"");
+
     // Erst die Named Pipe für das Lesen erstellen (Server-Ende)
     HANDLE serverPipe = CreateNamedPipeW(
-        L"\\\\.\\pipe\\myoutputpipe",      // pipe name
+        pipeName.c_str(),                  // pipe name
         PIPE_ACCESS_INBOUND,               // read-only
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         1,                                 // eine Instanz
@@ -88,7 +104,7 @@ HANDLE createPipeForProcess() {
     saAttr.lpSecurityDescriptor = NULL;
 
     HANDLE clientPipe = CreateFileW(
-        L"\\\\.\\pipe\\myoutputpipe",
+        pipeName.c_str(),                  // pipe name
         GENERIC_WRITE,
         0,                                 // Kein Sharing
         &saAttr,                           // Sicherheitsattribute mit Vererbung
@@ -174,7 +190,7 @@ int wmain(int argc, wchar_t* argv[])
         config.LaunchPath,    // EXE
         passTroughArgument,   // Args
         L"MiMallocReplacer.DLL"s, // The DLL (relative or absolute)
-		clientPipeHandle          //Client handle for the pipe for IO redirection
+        clientPipeHandle          //Client handle for the pipe for IO redirection
     );
 
     if (pid == 0) {
